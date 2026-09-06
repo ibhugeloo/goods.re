@@ -1,0 +1,12 @@
+node_modules
+dist
+.DS_Store
+.openai
+source-capture
+qa
+scripts
+worker
+tests
+AGENTS.md
+design-qa.md
+*.local
