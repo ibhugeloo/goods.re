@@ -5,9 +5,12 @@ import {
   Check,
   DownloadSimple,
   ImageSquare,
+  Lightbulb,
   MagnifyingGlass,
   PencilSimple,
   Plus,
+  SidebarSimple,
+  SquaresFour,
   Trash,
   UploadSimple,
   X,
@@ -44,40 +47,62 @@ function numericValue(value) {
   return Number.isFinite(parsed) ? parsed : "";
 }
 
+const viewLabels = {
+  owned: "Mes achats",
+  wishlist: "Wishlist",
+  suggestion: "Suggestions",
+  all: "Tous les objets",
+};
+
 function IntroPanel({
   activeView,
   categories,
   category,
+  compact,
   counts,
   onAdd,
   onCategory,
   onExport,
   onImport,
   onSearch,
+  onToggleCompact,
   onView,
   search,
 }) {
   const importRef = useRef(null);
   return (
-    <aside className="archive-sidebar">
+    <aside className={compact ? "archive-sidebar compact" : "archive-sidebar"}>
       <header className="sidebar-brand">
         <span className="brand-mark" aria-hidden="true">G/01</span>
         <div>
           <strong>Goods</strong>
           <span>Personal archive</span>
         </div>
+        <button
+          aria-expanded={!compact}
+          aria-label={compact ? "Déplier le sommaire" : "Replier le sommaire"}
+          className="sidebar-toggle"
+          onClick={onToggleCompact}
+          title={compact ? "Déplier le sommaire" : "Replier le sommaire"}
+          type="button"
+        >
+          <SidebarSimple aria-hidden="true" size={16} weight="regular" />
+        </button>
       </header>
 
       <div className="sidebar-section">
         <p className="sidebar-label">Collection</p>
         <nav className="archive-views" aria-label="Vues de la collection">
           {[
-            ["owned", "Mes achats", counts.owned],
-            ["wishlist", "Wishlist", counts.wishlist],
-            ["all", "Tous les objets", counts.all],
-          ].map(([value, label, count]) => (
-            <button className={activeView === value ? "active" : ""} key={value} onClick={() => onView(value)} type="button">
-              <span>{label}</span><small>{String(count).padStart(2, "0")}</small>
+            ["owned", "Mes achats", counts.owned, Check],
+            ["wishlist", "Wishlist", counts.wishlist, ArrowDown],
+            ["suggestion", "Suggestions", counts.suggestion, Lightbulb],
+            ["all", "Tous les objets", counts.all, SquaresFour],
+          ].map(([value, label, count, Icon]) => (
+            <button aria-label={label} className={activeView === value ? "active" : ""} key={value} onClick={() => onView(value)} title={label} type="button">
+              <Icon aria-hidden="true" className="view-icon" size={15} weight="regular" />
+              <span>{label}</span>
+              <small>{String(count).padStart(2, "0")}</small>
             </button>
           ))}
         </nav>
@@ -90,7 +115,7 @@ function IntroPanel({
       </div>
 
       <div className="sidebar-bottom">
-        <button className="sidebar-add" onClick={onAdd} type="button"><Plus aria-hidden="true" size={16} /> Ajouter un objet</button>
+        <button aria-label="Ajouter un objet" className="sidebar-add" onClick={onAdd} title="Ajouter un objet" type="button"><Plus aria-hidden="true" size={16} /> <span>Ajouter un objet</span></button>
         <div className="sidebar-tools">
           <button onClick={onExport} type="button"><DownloadSimple aria-hidden="true" size={15} /> Exporter</button>
           <button onClick={() => importRef.current?.click()} type="button"><UploadSimple aria-hidden="true" size={15} /> Importer</button>
@@ -121,8 +146,8 @@ function ProductCard({ index, item, onEdit }) {
         <div className="object-stamp">
           <span>{String(index + 1).padStart(2, "0")}</span>
           <span className="object-status">
-            {item.status === "owned" ? <Check size={12} weight="bold" /> : <ArrowDown size={12} weight="bold" />}
-            {item.status === "owned" ? "Dans la collection" : "À acquérir"}
+            {item.status === "owned" ? <Check size={12} weight="bold" /> : item.status === "suggestion" ? <Lightbulb size={12} weight="bold" /> : <ArrowDown size={12} weight="bold" />}
+            {item.status === "owned" ? "Dans la collection" : item.status === "suggestion" ? "Suggestion" : "À acquérir"}
           </span>
         </div>
         <button aria-label={`Modifier ${item.name}`} className="edit-button" onClick={() => onEdit(item)} type="button">
@@ -234,6 +259,13 @@ function ItemModal({ initialItem, onClose, onDelete, onSave }) {
             >
               Wishlist
             </button>
+            <button
+              className={draft.status === "suggestion" ? "active" : ""}
+              onClick={() => update("status", "suggestion")}
+              type="button"
+            >
+              Suggestion
+            </button>
           </div>
 
           <div className="form-grid">
@@ -341,6 +373,13 @@ export function App() {
   const [ready, setReady] = useState(false);
   const [activeView, setActiveView] = useState("owned");
   const [category, setCategory] = useState("all");
+  const [compact, setCompact] = useState(() => {
+    try {
+      return window.localStorage.getItem("goods.sidebar-compact") === "1";
+    } catch {
+      return false;
+    }
+  });
   const [search, setSearch] = useState("");
   const [editingItem, setEditingItem] = useState(null);
   const [notice, setNotice] = useState("");
@@ -351,6 +390,14 @@ export function App() {
       .catch(() => setNotice("Impossible de charger les données locales"))
       .finally(() => setReady(true));
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("goods.sidebar-compact", compact ? "1" : "0");
+    } catch {
+      // stockage indisponible, le repli reste valable pour la session
+    }
+  }, [compact]);
 
   useEffect(() => {
     if (!notice) return undefined;
@@ -379,6 +426,7 @@ export function App() {
     all: items.length,
     owned: items.filter((item) => item.status === "owned").length,
     wishlist: items.filter((item) => item.status === "wishlist").length,
+    suggestion: items.filter((item) => item.status === "suggestion").length,
   };
 
   const handleSave = async (item) => {
@@ -388,7 +436,13 @@ export function App() {
       return exists ? current.map((entry) => entry.id === item.id ? item : entry) : [item, ...current];
     });
     setEditingItem(null);
-    setNotice(item.status === "owned" ? "Achat enregistré" : "Wishlist mise à jour");
+    setNotice(
+      item.status === "owned"
+        ? "Achat enregistré"
+        : item.status === "suggestion"
+          ? "Suggestion enregistrée"
+          : "Wishlist mise à jour",
+    );
   };
 
   const handleDelete = async (id) => {
@@ -432,17 +486,19 @@ export function App() {
     <>
       <a className="skip-link" href="#inventory">Aller à l’inventaire</a>
       <main id="content">
-        <div className="app-shell">
+        <div className={compact ? "app-shell compact" : "app-shell"}>
           <IntroPanel
             activeView={activeView}
             categories={categories}
             category={category}
+            compact={compact}
             counts={counts}
             onAdd={() => setEditingItem({ ...emptyItem })}
             onCategory={setCategory}
             onExport={handleExport}
             onImport={handleImport}
             onSearch={setSearch}
+            onToggleCompact={() => setCompact((value) => !value)}
             onView={setActiveView}
             search={search}
           />
@@ -451,7 +507,7 @@ export function App() {
             <header className="workspace-header">
               <div>
                 <p className="workspace-kicker">Collection · {String(counts.all).padStart(2, "0")} objets</p>
-                <h1>{activeView === "owned" ? "Mes achats" : activeView === "wishlist" ? "Wishlist" : "Tous les objets"}</h1>
+                <h1>{viewLabels[activeView]}</h1>
               </div>
               <div className="workspace-actions">
                 <label className="search-field desktop-search">
