@@ -56,11 +56,14 @@ const viewLabels = {
 
 function IntroPanel({
   activeView,
+  brand,
+  brands,
   categories,
   category,
   compact,
   counts,
   onAdd,
+  onBrand,
   onCategory,
   onExport,
   onImport,
@@ -113,6 +116,21 @@ function IntroPanel({
         <button className={category === "all" ? "filter-link active" : "filter-link"} onClick={() => onCategory("all")} type="button">Toutes</button>
         {categories.map((name) => <button className={category === name ? "filter-link active" : "filter-link"} key={name} onClick={() => onCategory(name)} type="button">{name}</button>)}
       </div>
+
+      {brands.length > 0 && (
+        <div className="sidebar-section sidebar-filters sidebar-brands">
+          <p className="sidebar-label">Top marques</p>
+          <button className={brand === "all" ? "filter-link brand-link active" : "filter-link brand-link"} onClick={() => onBrand("all")} type="button">
+            <span>Toutes</span>
+          </button>
+          {brands.map(([name, count]) => (
+            <button className={brand === name ? "filter-link brand-link active" : "filter-link brand-link"} key={name} onClick={() => onBrand(name)} type="button">
+              <span>{name}</span>
+              <small>{String(count).padStart(2, "0")}</small>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="sidebar-bottom">
         <button aria-label="Ajouter un objet" className="sidebar-add" onClick={onAdd} title="Ajouter un objet" type="button"><Plus aria-hidden="true" size={16} /> <span>Ajouter un objet</span></button>
@@ -373,6 +391,7 @@ export function App() {
   const [ready, setReady] = useState(false);
   const [activeView, setActiveView] = useState("owned");
   const [category, setCategory] = useState("all");
+  const [brand, setBrand] = useState("all");
   const [compact, setCompact] = useState(() => {
     try {
       return window.localStorage.getItem("goods.sidebar-compact") === "1";
@@ -410,17 +429,34 @@ export function App() {
     [items],
   );
 
+  const brands = useMemo(() => {
+    const tally = new Map();
+    for (const item of items) {
+      const name = item.brand?.trim();
+      if (!name) continue;
+      tally.set(name, (tally.get(name) ?? 0) + 1);
+    }
+    return [...tally.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "fr"))
+      .slice(0, 5);
+  }, [items]);
+
   const filteredItems = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("fr");
     return items.filter((item) => {
       const viewMatch = activeView === "all" || item.status === activeView;
       const categoryMatch = category === "all" || item.category === category;
+      const brandMatch = brand === "all" || item.brand?.trim() === brand;
       const searchMatch = !query || [item.name, item.brand, item.category, item.notes]
         .filter(Boolean)
         .some((value) => value.toLocaleLowerCase("fr").includes(query));
-      return viewMatch && categoryMatch && searchMatch;
+      return viewMatch && categoryMatch && brandMatch && searchMatch;
     });
-  }, [activeView, category, items, search]);
+  }, [activeView, brand, category, items, search]);
+
+  useEffect(() => {
+    if (brand !== "all" && !brands.some(([name]) => name === brand)) setBrand("all");
+  }, [brand, brands]);
 
   const counts = {
     all: items.length,
@@ -475,6 +511,7 @@ export function App() {
       setItems(parsed);
       setActiveView("all");
       setCategory("all");
+      setBrand("all");
       setSearch("");
       setNotice("Collection importée");
     } catch {
@@ -491,9 +528,12 @@ export function App() {
             activeView={activeView}
             categories={categories}
             category={category}
+            brand={brand}
+            brands={brands}
             compact={compact}
             counts={counts}
             onAdd={() => setEditingItem({ ...emptyItem })}
+            onBrand={setBrand}
             onCategory={setCategory}
             onExport={handleExport}
             onImport={handleImport}

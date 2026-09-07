@@ -48,7 +48,12 @@ p, h1, h2 { margin: 0; }
 .filter-link { justify-content: flex-start; min-height: 28px; padding: 0 8px; color: var(--muted); background: transparent; font-size: 12px; text-align: left; }
 .filter-link:hover, .filter-link.active { color: var(--ink); }
 .filter-link.active { font-weight: 500; }
+.brand-link { gap: 10px; }
+.brand-link span { margin-right: auto; }
+.brand-link.active::before { margin-right: 0; }
+.brand-link small { color: var(--faint); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
 .filter-link.active::before { width: 4px; height: 4px; margin-right: 8px; border-radius: 50%; background: var(--ink); content: ""; }
+.sidebar-brands { margin-top: 44px; }
 .sidebar-bottom { margin-top: auto; }
 .sidebar-add { justify-content: flex-start; gap: 8px; width: 100%; min-height: 38px; border: 1px solid var(--ink); color: var(--surface); background: var(--ink); font-size: 11px; transition: background 160ms ease; }
 .sidebar-add:hover { background: #3b3b38; }
