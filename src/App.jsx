@@ -133,7 +133,6 @@ function IntroPanel({
       )}
 
       <div className="sidebar-bottom">
-        <button aria-label="Ajouter un objet" className="sidebar-add" onClick={onAdd} title="Ajouter un objet" type="button"><Plus aria-hidden="true" size={16} /> <span>Ajouter un objet</span></button>
         <div className="sidebar-tools">
           <button onClick={onExport} type="button"><DownloadSimple aria-hidden="true" size={15} /> Exporter</button>
           <button onClick={() => importRef.current?.click()} type="button"><UploadSimple aria-hidden="true" size={15} /> Importer</button>
