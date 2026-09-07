@@ -65,22 +65,14 @@ function IntroPanel({
   onAdd,
   onBrand,
   onCategory,
-  onExport,
-  onImport,
   onSearch,
   onToggleCompact,
   onView,
   search,
 }) {
-  const importRef = useRef(null);
   return (
     <aside className={compact ? "archive-sidebar compact" : "archive-sidebar"}>
       <header className="sidebar-brand">
-        <span className="brand-mark" aria-hidden="true">G/01</span>
-        <div>
-          <strong>Goods</strong>
-          <span>Personal archive</span>
-        </div>
         <button
           aria-expanded={!compact}
           aria-label={compact ? "Déplier le sommaire" : "Replier le sommaire"}
@@ -89,8 +81,12 @@ function IntroPanel({
           title={compact ? "Déplier le sommaire" : "Replier le sommaire"}
           type="button"
         >
-          <SidebarSimple aria-hidden="true" size={16} weight="regular" />
+          <SidebarSimple aria-hidden="true" size={18} weight="regular" />
         </button>
+        <div>
+          <strong>Goods</strong>
+          <span>Archives</span>
+        </div>
       </header>
 
       <div className="sidebar-section">
@@ -133,11 +129,6 @@ function IntroPanel({
       )}
 
       <div className="sidebar-bottom">
-        <div className="sidebar-tools">
-          <button onClick={onExport} type="button"><DownloadSimple aria-hidden="true" size={15} /> Exporter</button>
-          <button onClick={() => importRef.current?.click()} type="button"><UploadSimple aria-hidden="true" size={15} /> Importer</button>
-          <input accept="application/json" className="hidden-input" onChange={onImport} ref={importRef} type="file" />
-        </div>
         <p className="sidebar-footnote"><i /> Stockage local uniquement</p>
       </div>
 
@@ -401,6 +392,7 @@ export function App() {
   const [search, setSearch] = useState("");
   const [editingItem, setEditingItem] = useState(null);
   const [notice, setNotice] = useState("");
+  const importRef = useRef(null);
 
   useEffect(() => {
     loadItems()
@@ -534,8 +526,6 @@ export function App() {
             onAdd={() => setEditingItem({ ...emptyItem })}
             onBrand={setBrand}
             onCategory={setCategory}
-            onExport={handleExport}
-            onImport={handleImport}
             onSearch={setSearch}
             onToggleCompact={() => setCompact((value) => !value)}
             onView={setActiveView}
@@ -555,6 +545,13 @@ export function App() {
                   <input onChange={(event) => onSearch(event.target.value)} placeholder="Rechercher" type="search" value={search} />
                 </label>
                 <button className="primary-button" onClick={() => setEditingItem({ ...emptyItem })} type="button"><Plus aria-hidden="true" size={16} /> <span>Ajouter</span></button>
+                <button aria-label="Exporter la collection" className="icon-button" onClick={handleExport} title="Exporter la collection" type="button">
+                  <DownloadSimple aria-hidden="true" size={16} weight="regular" />
+                </button>
+                <button aria-label="Importer une collection" className="icon-button" onClick={() => importRef.current?.click()} title="Importer une collection" type="button">
+                  <UploadSimple aria-hidden="true" size={16} weight="regular" />
+                </button>
+                <input accept="application/json" className="hidden-input" onChange={handleImport} ref={importRef} type="file" />
               </div>
             </header>
 
