@@ -3,6 +3,7 @@ import { demoItems } from "./data";
 const DB_NAME = "goods-re-local";
 const STORE_NAME = "items";
 const DB_VERSION = 1;
+const SEEDED_KEY = "goods.seeded";
 const demoOrder = new Map([
   "demo-shower-head",
   "demo-leica-q3",
@@ -10,7 +11,29 @@ const demoOrder = new Map([
   "demo-pepper-mill",
   "demo-card-holder",
   "demo-beoplay",
+  "demo-alessi-kettle",
+  "demo-nomos-club",
 ].map((id, index) => [id, index]));
+
+export function isDemoItem(id) {
+  return demoOrder.has(id);
+}
+
+function readSeeded() {
+  try {
+    return window.localStorage.getItem(SEEDED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markSeeded() {
+  try {
+    window.localStorage.setItem(SEEDED_KEY, "1");
+  } catch {
+    // stockage indisponible : la démo pourra réapparaître, sans perte de données
+  }
+}
 
 function sortItems(items) {
   return [...items].sort((first, second) => {
@@ -62,9 +85,16 @@ export async function loadItems() {
   const items = await requestToPromise(transaction.objectStore(STORE_NAME).getAll());
   database.close();
 
-  if (items.length > 0) return sortItems(items);
+  if (items.length > 0) {
+    markSeeded();
+    return sortItems(items);
+  }
+
+  // Collection vide et déjà visitée : c'est un choix de l'utilisateur, pas une première visite.
+  if (readSeeded()) return [];
 
   await replaceItems(demoItems);
+  markSeeded();
   return sortItems(demoItems);
 }
 
@@ -93,6 +123,19 @@ export async function replaceItems(items) {
   store.clear();
   for (const item of items) {
     store.put(item);
+  }
+
+  await transactionToPromise(transaction);
+  database.close();
+}
+
+export async function removeItems(ids) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, "readwrite");
+  const store = transaction.objectStore(STORE_NAME);
+
+  for (const id of ids) {
+    store.delete(id);
   }
 
   await transactionToPromise(transaction);

@@ -15,8 +15,8 @@ import {
   UploadSimple,
   X,
 } from "@phosphor-icons/react";
-import { emptyItem } from "./data";
-import { loadItems, removeItem, replaceItems, saveItem } from "./db";
+import { demoItems, emptyItem } from "./data";
+import { isDemoItem, loadItems, markSeeded, removeItem, removeItems, replaceItems, saveItem } from "./db";
 
 const money = new Intl.NumberFormat("fr-FR", {
   style: "currency",
@@ -54,6 +54,63 @@ const viewLabels = {
   all: "Tous les objets",
 };
 
+const viewEntries = [
+  ["owned", "Mes achats", "Achats", Check],
+  ["wishlist", "Wishlist", "Wishlist", ArrowDown],
+  ["suggestion", "Suggestions", "Idées", Lightbulb],
+  ["all", "Tous les objets", "Tous", SquaresFour],
+];
+
+const statusLabels = {
+  owned: "Dans la collection",
+  wishlist: "À acquérir",
+  suggestion: "À considérer",
+};
+
+function StatusIcon({ size = 12, status }) {
+  if (status === "owned") return <Check aria-hidden="true" size={size} weight="bold" />;
+  if (status === "suggestion") return <Lightbulb aria-hidden="true" size={size} weight="bold" />;
+  return <ArrowDown aria-hidden="true" size={size} weight="bold" />;
+}
+
+// Garantie : seuls « bientôt » et « expirée » méritent une pastille sur la carte.
+function warrantyState(item) {
+  if (item.status !== "owned" || !item.warrantyUntil) return null;
+  const end = new Date(`${item.warrantyUntil}T12:00:00`);
+  if (Number.isNaN(end.getTime())) return null;
+
+  const days = Math.round((end.getTime() - Date.now()) / 86400000);
+  if (days < 0) return { days, flag: true, label: "Garantie expirée", tone: "expired" };
+  if (days <= 90) return { days, flag: true, label: `Garantie · ${days} j`, tone: "soon" };
+  return { days, flag: false, label: `Garantie · ${formatDate(item.warrantyUntil)}`, tone: "ok" };
+}
+
+// Écart entre le prix constaté et le prix cible d'un objet convoité.
+function priceGap(item) {
+  if (item.status === "owned") return null;
+  const current = numericValue(item.currentValue);
+  const target = numericValue(item.targetPrice);
+  if (current === "" || target === "") return null;
+
+  const diff = Math.round(current - target);
+  if (diff <= 0) return { diff, label: "Au prix cible", reached: true };
+  return { diff, label: `${money.format(diff)} au-dessus`, reached: false };
+}
+
+function StorageNote({ className, onExport, onResetDemo, showReset }) {
+  return (
+    <div className={className}>
+      <p className="sidebar-footnote"><i /> Stockage local uniquement</p>
+      <div className="storage-actions">
+        <button className="text-link" onClick={onExport} type="button">Exporter une sauvegarde</button>
+        {showReset && (
+          <button className="text-link" onClick={onResetDemo} type="button">Retirer les exemples</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function IntroPanel({
   activeView,
   brand,
@@ -62,14 +119,18 @@ function IntroPanel({
   category,
   compact,
   counts,
-  onAdd,
   onBrand,
   onCategory,
+  onExport,
+  onResetDemo,
   onSearch,
   onToggleCompact,
   onView,
   search,
+  showReset,
 }) {
+  const storage = { onExport, onResetDemo, showReset };
+
   return (
     <aside className={compact ? "archive-sidebar compact" : "archive-sidebar"}>
       <header className="sidebar-brand">
@@ -92,16 +153,11 @@ function IntroPanel({
       <div className="sidebar-section">
         <p className="sidebar-label">Collection</p>
         <nav className="archive-views" aria-label="Vues de la collection">
-          {[
-            ["owned", "Mes achats", counts.owned, Check],
-            ["wishlist", "Wishlist", counts.wishlist, ArrowDown],
-            ["suggestion", "Suggestions", counts.suggestion, Lightbulb],
-            ["all", "Tous les objets", counts.all, SquaresFour],
-          ].map(([value, label, count, Icon]) => (
+          {viewEntries.map(([value, label, , Icon]) => (
             <button aria-label={label} className={activeView === value ? "active" : ""} key={value} onClick={() => onView(value)} title={label} type="button">
               <Icon aria-hidden="true" className="view-icon" size={15} weight="regular" />
               <span>{label}</span>
-              <small>{String(count).padStart(2, "0")}</small>
+              <small>{String(counts[value]).padStart(2, "0")}</small>
             </button>
           ))}
         </nav>
@@ -129,38 +185,60 @@ function IntroPanel({
       )}
 
       <div className="sidebar-bottom">
-        <p className="sidebar-footnote"><i /> Stockage local uniquement</p>
+        <StorageNote className="sidebar-storage" {...storage} />
       </div>
 
-      <div className="mobile-filter-row">
-        <label className="search-field">
+      <div className="mobile-toolbar">
+        <nav className="mobile-views" aria-label="Vues de la collection">
+          {viewEntries.map(([value, label, short, Icon]) => (
+            <button aria-label={label} className={activeView === value ? "active" : ""} key={value} onClick={() => onView(value)} type="button">
+              <Icon aria-hidden="true" size={13} weight="regular" />
+              <span>{short}</span>
+              <small>{String(counts[value]).padStart(2, "0")}</small>
+            </button>
+          ))}
+        </nav>
+
+        <label className="search-field mobile-search">
           <MagnifyingGlass aria-hidden="true" size={16} weight="regular" />
           <span className="sr-only">Rechercher dans la collection</span>
           <input onChange={(event) => onSearch(event.target.value)} placeholder="Rechercher" type="search" value={search} />
         </label>
-        <button className="primary-button" onClick={onAdd} type="button"><Plus aria-hidden="true" size={16} /></button>
+
+        <div className="mobile-chips" role="group" aria-label="Filtrer par catégorie">
+          <button className={category === "all" ? "chip active" : "chip"} onClick={() => onCategory("all")} type="button">Toutes</button>
+          {categories.map((name) => (
+            <button className={category === name ? "chip active" : "chip"} key={name} onClick={() => onCategory(name)} type="button">{name}</button>
+          ))}
+        </div>
+
       </div>
     </aside>
   );
 }
 
-function ProductCard({ index, item, onEdit }) {
+function ProductCard({ index, item, onOpen }) {
   const displayValue = item.status === "owned" ? item.currentValue : item.targetPrice || item.currentValue;
   const valueLabel = item.status === "owned" ? "Valeur" : item.targetPrice ? "Cible" : "Prix";
+  const warranty = warrantyState(item);
+  const gap = priceGap(item);
 
   return (
     <article className={`object-card ${item.status}`}>
+      <button
+        aria-label={`Ouvrir la fiche ${item.name}`}
+        className="card-hit"
+        onClick={() => onOpen(item)}
+        type="button"
+      />
       <div className="object-stage">
         <div className="object-stamp">
           <span>{String(index + 1).padStart(2, "0")}</span>
           <span className="object-status">
-            {item.status === "owned" ? <Check size={12} weight="bold" /> : item.status === "suggestion" ? <Lightbulb size={12} weight="bold" /> : <ArrowDown size={12} weight="bold" />}
-            {item.status === "owned" ? "Dans la collection" : item.status === "suggestion" ? "Suggestion" : "À acquérir"}
+            <StatusIcon status={item.status} />
+            {statusLabels[item.status] ?? statusLabels.wishlist}
           </span>
         </div>
-        <button aria-label={`Modifier ${item.name}`} className="edit-button" onClick={() => onEdit(item)} type="button">
-          <PencilSimple aria-hidden="true" size={16} weight="regular" />
-        </button>
 
         <div className="product-visual">
           {item.image ? (
@@ -169,6 +247,9 @@ function ProductCard({ index, item, onEdit }) {
             <ImageSquare aria-hidden="true" className="image-placeholder" size={42} weight="thin" />
           )}
         </div>
+
+        {warranty?.flag && <p className={`card-flag ${warranty.tone}`}>{warranty.label}</p>}
+        {gap && <p className={gap.reached ? "card-flag reached" : "card-flag"}>{gap.label}</p>}
       </div>
 
       <div className="object-caption">
@@ -183,6 +264,122 @@ function ProductCard({ index, item, onEdit }) {
         </div>
       </div>
     </article>
+  );
+}
+
+function DetailRow({ children, label, tone = "" }) {
+  if (!children) return null;
+  return (
+    <div className={tone ? `detail-row ${tone}` : "detail-row"}>
+      <dt>{label}</dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
+
+function ItemDetail({ item, onClose, onDelete, onEdit, onStatus }) {
+  useEffect(() => {
+    const escape = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", escape);
+    document.body.classList.add("modal-open");
+    return () => {
+      document.removeEventListener("keydown", escape);
+      document.body.classList.remove("modal-open");
+    };
+  }, [onClose]);
+
+  const warranty = warrantyState(item);
+  const gap = priceGap(item);
+  const owned = item.status === "owned";
+  const promotion = item.status === "suggestion"
+    ? { label: "Passer en wishlist", status: "wishlist" }
+    : item.status === "wishlist"
+      ? { label: "Marquer comme acheté", status: "owned" }
+      : null;
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section aria-labelledby="detail-title" aria-modal="true" className="item-modal item-detail" role="dialog">
+        <header className="modal-header">
+          <div>
+            <p className="modal-kicker">
+              <StatusIcon size={11} status={item.status} />
+              {statusLabels[item.status] ?? statusLabels.wishlist}
+            </p>
+            <h1 id="detail-title">{item.name}</h1>
+            <p className="detail-brand">{item.brand || "Sans marque"}{item.category ? ` · ${item.category}` : ""}</p>
+          </div>
+          <button aria-label="Fermer" className="icon-button" onClick={onClose} type="button">
+            <X aria-hidden="true" size={17} weight="regular" />
+          </button>
+        </header>
+
+        <div className="detail-body">
+          <div className={`detail-visual ${item.status}`}>
+            {item.image ? (
+              <img alt={item.name} src={item.image} />
+            ) : (
+              <ImageSquare aria-hidden="true" className="image-placeholder" size={46} weight="thin" />
+            )}
+          </div>
+
+          {item.notes && (
+            <blockquote className="detail-notes">{item.notes}</blockquote>
+          )}
+
+          <dl className="detail-list">
+            {owned ? (
+              <>
+                <DetailRow label="Payé">{item.purchasePrice === "" ? null : formatMoney(item.purchasePrice)}</DetailRow>
+                <DetailRow label="Valeur estimée">{item.currentValue === "" ? null : formatMoney(item.currentValue)}</DetailRow>
+                <DetailRow label="Acheté le">{item.purchaseDate ? formatDate(item.purchaseDate) : null}</DetailRow>
+                <DetailRow label="Garantie" tone={warranty?.flag ? warranty.tone : ""}>
+                  {warranty ? (warranty.tone === "expired" ? `Expirée le ${formatDate(item.warrantyUntil)}` : `Jusqu’au ${formatDate(item.warrantyUntil)}`) : null}
+                </DetailRow>
+                <DetailRow label="Où">{item.location || null}</DetailRow>
+              </>
+            ) : (
+              <>
+                <DetailRow label="Prix constaté">{item.currentValue === "" ? null : formatMoney(item.currentValue)}</DetailRow>
+                <DetailRow label="Prix cible">{item.targetPrice === "" ? null : formatMoney(item.targetPrice)}</DetailRow>
+                <DetailRow label="Écart" tone={gap?.reached ? "reached" : ""}>{gap ? gap.label : null}</DetailRow>
+                <DetailRow label="Priorité">{item.priority || null}</DetailRow>
+                <DetailRow label="Repéré le">{item.addedDate ? formatDate(item.addedDate) : null}</DetailRow>
+              </>
+            )}
+            <DetailRow label="État">{item.condition || null}</DetailRow>
+            <DetailRow label="Vendeur">{item.retailer || null}</DetailRow>
+          </dl>
+
+          {item.url && (
+            <a className="detail-link" href={item.url} rel="noreferrer" target="_blank">
+              <ArrowSquareOut aria-hidden="true" size={15} weight="regular" />
+              Voir la fiche produit
+            </a>
+          )}
+        </div>
+
+        <footer className="modal-footer detail-footer">
+          <button className="danger-button" onClick={() => onDelete(item)} type="button">
+            <Trash aria-hidden="true" size={15} weight="regular" />
+            Supprimer
+          </button>
+          <div>
+            {promotion && (
+              <button className="secondary-button" onClick={() => onStatus(item, promotion.status)} type="button">
+                {promotion.label}
+              </button>
+            )}
+            <button className="secondary-button" onClick={() => onEdit(item)} type="button">
+              <PencilSimple aria-hidden="true" size={15} weight="regular" />
+              Éditer
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
   );
 }
 
@@ -360,7 +557,7 @@ function ItemModal({ initialItem, onClose, onDelete, onSave }) {
 
           <footer className="modal-footer">
             {draft.id ? (
-              <button className="danger-button" onClick={() => onDelete(draft.id)} type="button">
+              <button className="danger-button" onClick={() => onDelete(draft)} type="button">
                 <Trash aria-hidden="true" size={15} weight="regular" />
                 Supprimer
               </button>
@@ -376,6 +573,58 @@ function ItemModal({ initialItem, onClose, onDelete, onSave }) {
   );
 }
 
+function ConfirmDialog({ request, onCancel }) {
+  const confirmRef = useRef(null);
+
+  useEffect(() => {
+    const escape = (event) => {
+      if (event.key === "Escape") onCancel();
+    };
+    document.addEventListener("keydown", escape);
+    confirmRef.current?.focus();
+    return () => document.removeEventListener("keydown", escape);
+  }, [onCancel]);
+
+  return (
+    <div className="modal-backdrop confirm-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
+      <section aria-labelledby="confirm-title" aria-modal="true" className="confirm-dialog" role="alertdialog">
+        <h2 id="confirm-title">{request.title}</h2>
+        <p>{request.body}</p>
+        <div className="confirm-actions">
+          <button className="secondary-button" onClick={onCancel} type="button">Annuler</button>
+          <button
+            className={request.tone === "danger" ? "danger-button solid" : "primary-button"}
+            onClick={request.onConfirm}
+            ref={confirmRef}
+            type="button"
+          >
+            {request.confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const emptyStates = {
+  owned: {
+    title: "Aucun achat archivé",
+    body: "Ajoutez un objet que vous possédez : lieu, garantie et notes d’entretien resteront à portée.",
+  },
+  wishlist: {
+    title: "Wishlist vide",
+    body: "La wishlist rassemble ce que vous comptez acheter. Fixez un prix cible pour suivre l’écart.",
+  },
+  suggestion: {
+    title: "Aucune suggestion",
+    body: "Les suggestions sont les objets gardés sous le coude : idée cadeau, envie pas encore mûre. Passez-les en wishlist quand le désir devient réel.",
+  },
+  all: {
+    title: "Collection vide",
+    body: "Rien n’est enregistré dans ce navigateur. Ajoutez une pièce, importez une sauvegarde ou repartez des exemples.",
+  },
+};
+
 export function App() {
   const [items, setItems] = useState([]);
   const [ready, setReady] = useState(false);
@@ -390,7 +639,9 @@ export function App() {
     }
   });
   const [search, setSearch] = useState("");
+  const [detailItem, setDetailItem] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
+  const [confirmation, setConfirmation] = useState(null);
   const [notice, setNotice] = useState("");
   const importRef = useRef(null);
 
@@ -449,12 +700,19 @@ export function App() {
     if (brand !== "all" && !brands.some(([name]) => name === brand)) setBrand("all");
   }, [brand, brands]);
 
+  useEffect(() => {
+    if (category !== "all" && !categories.includes(category)) setCategory("all");
+  }, [categories, category]);
+
   const counts = {
     all: items.length,
     owned: items.filter((item) => item.status === "owned").length,
     wishlist: items.filter((item) => item.status === "wishlist").length,
     suggestion: items.filter((item) => item.status === "suggestion").length,
   };
+
+  const demoIds = useMemo(() => items.filter((item) => isDemoItem(item.id)).map((item) => item.id), [items]);
+  const isFiltered = search.trim() !== "" || category !== "all" || brand !== "all";
 
   const handleSave = async (item) => {
     await saveItem(item);
@@ -463,6 +721,7 @@ export function App() {
       return exists ? current.map((entry) => entry.id === item.id ? item : entry) : [item, ...current];
     });
     setEditingItem(null);
+    setDetailItem((current) => (current && current.id === item.id ? item : current));
     setNotice(
       item.status === "owned"
         ? "Achat enregistré"
@@ -472,11 +731,30 @@ export function App() {
     );
   };
 
-  const handleDelete = async (id) => {
-    await removeItem(id);
-    setItems((current) => current.filter((item) => item.id !== id));
-    setEditingItem(null);
-    setNotice("Fiche supprimée");
+  const handleStatus = async (item, status) => {
+    const next = { ...item, status };
+    if (status === "owned" && !next.purchaseDate) next.purchaseDate = new Date().toISOString().slice(0, 10);
+    await saveItem(next);
+    setItems((current) => current.map((entry) => (entry.id === next.id ? next : entry)));
+    setDetailItem(next);
+    setNotice(status === "owned" ? "Déplacé dans les achats" : "Déplacé dans la wishlist");
+  };
+
+  const handleDelete = (item) => {
+    setConfirmation({
+      body: `« ${item.name} » sera retiré définitivement de ce navigateur. Cette action ne peut pas être annulée.`,
+      confirmLabel: "Supprimer",
+      onConfirm: async () => {
+        await removeItem(item.id);
+        setItems((current) => current.filter((entry) => entry.id !== item.id));
+        setConfirmation(null);
+        setEditingItem(null);
+        setDetailItem(null);
+        setNotice("Fiche supprimée");
+      },
+      title: "Supprimer cette fiche ?",
+      tone: "danger",
+    });
   };
 
   const handleExport = () => {
@@ -495,20 +773,62 @@ export function App() {
     event.target.value = "";
     if (!file) return;
 
+    let parsed;
     try {
-      const parsed = JSON.parse(await file.text());
+      parsed = JSON.parse(await file.text());
       if (!Array.isArray(parsed) || parsed.some((item) => !item.id || !item.name)) throw new Error("format");
-      await replaceItems(parsed);
-      setItems(parsed);
-      setActiveView("all");
-      setCategory("all");
-      setBrand("all");
-      setSearch("");
-      setNotice("Collection importée");
     } catch {
       setNotice("Fichier JSON invalide");
+      return;
     }
+
+    setConfirmation({
+      body: items.length > 0
+        ? `L’import remplace la collection : ${items.length} objet${items.length > 1 ? "s" : ""} enregistré${items.length > 1 ? "s" : ""} seront écrasés par ${parsed.length} objet${parsed.length > 1 ? "s" : ""}. Exportez une sauvegarde avant si besoin.`
+        : `${parsed.length} objet${parsed.length > 1 ? "s" : ""} seront chargés dans ce navigateur.`,
+      confirmLabel: "Remplacer",
+      onConfirm: async () => {
+        await replaceItems(parsed);
+        markSeeded();
+        setItems(parsed);
+        setActiveView("all");
+        setCategory("all");
+        setBrand("all");
+        setSearch("");
+        setConfirmation(null);
+        setNotice("Collection importée");
+      },
+      title: "Remplacer la collection ?",
+      tone: "danger",
+    });
   };
+
+  const handleResetDemo = () => {
+    setConfirmation({
+      body: `Les ${demoIds.length} objets d’exemple seront supprimés. Vos propres fiches sont conservées.`,
+      confirmLabel: "Retirer",
+      onConfirm: async () => {
+        await removeItems(demoIds);
+        markSeeded();
+        setItems((current) => current.filter((entry) => !isDemoItem(entry.id)));
+        setConfirmation(null);
+        setNotice("Exemples retirés");
+      },
+      title: "Retirer les exemples ?",
+      tone: "danger",
+    });
+  };
+
+  const handleRestoreDemo = async () => {
+    await replaceItems(demoItems);
+    markSeeded();
+    setItems(demoItems);
+    setNotice("Exemples rechargés");
+  };
+
+  const emptyState = isFiltered
+    ? { body: "Aucun objet ne correspond à cette recherche ou à ce filtre.", title: "Aucun résultat" }
+    : emptyStates[activeView];
 
   return (
     <>
@@ -523,13 +843,15 @@ export function App() {
             brands={brands}
             compact={compact}
             counts={counts}
-            onAdd={() => setEditingItem({ ...emptyItem })}
             onBrand={setBrand}
             onCategory={setCategory}
+            onExport={handleExport}
+            onResetDemo={handleResetDemo}
             onSearch={setSearch}
             onToggleCompact={() => setCompact((value) => !value)}
             onView={setActiveView}
             search={search}
+            showReset={demoIds.length > 0}
           />
 
           <div className="archive-workspace">
@@ -542,9 +864,9 @@ export function App() {
                 <label className="search-field desktop-search">
                   <MagnifyingGlass aria-hidden="true" size={16} weight="regular" />
                   <span className="sr-only">Rechercher dans la collection</span>
-                  <input onChange={(event) => onSearch(event.target.value)} placeholder="Rechercher" type="search" value={search} />
+                  <input onChange={(event) => setSearch(event.target.value)} placeholder="Rechercher" type="search" value={search} />
                 </label>
-                <button className="primary-button" onClick={() => setEditingItem({ ...emptyItem })} type="button"><Plus aria-hidden="true" size={16} /> <span>Ajouter</span></button>
+                <button className="primary-button desktop-add" onClick={() => setEditingItem({ ...emptyItem })} type="button"><Plus aria-hidden="true" size={16} /> <span>Ajouter</span></button>
                 <button aria-label="Exporter la collection" className="icon-button" onClick={handleExport} title="Exporter la collection" type="button">
                   <DownloadSimple aria-hidden="true" size={16} weight="regular" />
                 </button>
@@ -561,13 +883,21 @@ export function App() {
                   <div className="empty-state"><span>Chargement de la collection</span></div>
                 ) : filteredItems.length > 0 ? (
                   filteredItems.map((item, index) => (
-                    <ProductCard index={index} item={item} key={item.id} onEdit={setEditingItem} />
+                    <ProductCard index={index} item={item} key={item.id} onOpen={setDetailItem} />
                   ))
                 ) : (
                   <div className="empty-state">
-                    <ImageSquare aria-hidden="true" size={28} weight="thin" />
-                    <span>Aucun objet dans cette sélection</span>
-                    <button className="secondary-button" onClick={() => setEditingItem({ ...emptyItem })} type="button">Ajouter un objet</button>
+                    {activeView === "suggestion" && !isFiltered
+                      ? <Lightbulb aria-hidden="true" size={28} weight="thin" />
+                      : <ImageSquare aria-hidden="true" size={28} weight="thin" />}
+                    <strong>{emptyState.title}</strong>
+                    <p>{emptyState.body}</p>
+                    <div className="empty-actions">
+                      <button className="secondary-button" onClick={() => setEditingItem({ ...emptyItem, status: activeView === "all" ? "wishlist" : activeView })} type="button">Ajouter un objet</button>
+                      {items.length === 0 && !isFiltered && (
+                        <button className="secondary-button" onClick={handleRestoreDemo} type="button">Charger les exemples</button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -575,14 +905,31 @@ export function App() {
           </div>
         </div>
 
+        <StorageNote
+          className="mobile-storage"
+          onExport={handleExport}
+          onResetDemo={handleResetDemo}
+          showReset={demoIds.length > 0}
+        />
+
         <footer className="archive-footer">
           <span>OBJETS · Archive personnelle</span>
           <span>{new Date().getFullYear()} · Données locales</span>
         </footer>
 
-      <button aria-label="Ajouter une pièce" className="mobile-add-button" onClick={() => setEditingItem({ ...emptyItem })} type="button">
-        <Plus aria-hidden="true" size={18} weight="regular" />
-      </button>
+        <button aria-label="Ajouter une pièce" className="mobile-add-button" onClick={() => setEditingItem({ ...emptyItem })} type="button">
+          <Plus aria-hidden="true" size={20} weight="regular" />
+        </button>
+
+        {detailItem && !editingItem && (
+          <ItemDetail
+            item={detailItem}
+            onClose={() => setDetailItem(null)}
+            onDelete={handleDelete}
+            onEdit={(item) => setEditingItem(item)}
+            onStatus={handleStatus}
+          />
+        )}
 
         {editingItem && (
           <ItemModal
@@ -592,6 +939,8 @@ export function App() {
             onSave={handleSave}
           />
         )}
+
+        {confirmation && <ConfirmDialog onCancel={() => setConfirmation(null)} request={confirmation} />}
 
         {notice && <div className="notice" role="status">{notice}</div>}
       </main>
